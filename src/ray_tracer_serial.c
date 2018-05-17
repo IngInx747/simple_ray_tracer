@@ -193,7 +193,7 @@ void setArgs(int argc, char** argv) {
 	};
 
 	/* Detect the end of the options. */
-	while ( (ch = getopt_long(argc, argv, "n:", long_options, &option_index)) != -1 ) {
+	while ( (ch = getopt_long(argc, argv, "n:r:", long_options, &option_index)) != -1 ) {
 		switch (ch) {
 			case 'n':
 				num_pixel = atoi(optarg);
