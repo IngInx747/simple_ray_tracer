@@ -82,6 +82,7 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 	w_min_z = camera.pos.z - camera.height * 0.5;
 	dotp_cc = vec3DotP(vec_c, vec_c);
 
+	omp_set_num_threads(16);
 	#pragma omp parallel for schedule(guided) shared(mat_grid) private(n)
 	for (n=0; n<nrays; n++) {
 
