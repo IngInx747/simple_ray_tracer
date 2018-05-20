@@ -3,18 +3,41 @@ SRC = src
 INCLUDE = include
 OBJ = obj
 
-COMPILER = gcc
+## Compiler
+CPUCOMPILER = gcc
+GPUCOMPILER = nvcc
+GPULINKER = nvlink
+
+## Flags
 HEADFLAG = -I"$(INCLUDE)/"
 OMPFLAG = -fopenmp
-CC = $(COMPILER) $(HEADFLAG) $(OMPFLAG)
+XPTFLAG = -Xcompiler
+ARCHFLAG = -arch=sm_30
 
-all: ray_tracer_serial
+##
+CC = $(CPUCOMPILER) $(HEADFLAG) $(OMPFLAG)
+NV = $(GPUCOMPILER) $(HEADFLAG)
+NL = $(GPULINKER) $(ARCHFLAG)
 
-ray_tracer_serial: $(SRC)/ray_tracer_serial.c vec.o
-	$(CC) $(SRC)/ray_tracer_serial.c $(OBJ)/*.o -o $@.exe -lm
+all: ray_tracer_cpu ray_tracer_gpu
+
+ray_tracer_cpu: ray_tracer_cpu.o vec.o
+	$(CC) $(OBJ)/*.o -o $@.exe -lm
+
+ray_tracer_gpu: ray_tracer_gpu.co vec_gpu.co
+	$(NL) $(OBJ)/*.co -o $@.exe
+
+ray_tracer_cpu.o: $(SRC)/ray_tracer_cpu.c
+	$(CC) -c $(SRC)/ray_tracer_cpu.c -o $(OBJ)/$@ -lm
+
+ray_tracer_gpu.co: $(SRC)/ray_tracer_gpu.cu
+	$(NV) -dc $(SRC)/ray_tracer_gpu.cu -o $(OBJ)/$@
 
 vec.o: $(SRC)/vec.c $(INCLUDE)/vec.h
-	$(CC) -c $(SRC)/vec.c -o $(OBJ)/$@
+	$(CC) -c $< -o $(OBJ)/$@
+
+vec_gpu.co: $(SRC)/vec_gpu.cu $(INCLUDE)/vec_gpu.h
+	$(NV) -dc $< -o $(OBJ)/$@
 
 clean:
-	rm *.exe $(OBJ)/*.o
+	rm *.exe $(OBJ)/*.o $(OBJ)/*.co

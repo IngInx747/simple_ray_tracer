@@ -26,18 +26,25 @@ def readCommand(argv):
 	return args
 
 def get_data_binary(ifilename, nrow, ncol):
+
+	''' Plot double data in binary format '''
+
 	data = np.fromfile(ifilename)
 	data = [data[i*ncol:(i+1)*ncol] for i in range(nrow)]
 	return data
 
-def get_data_xy(ifilename):
+def get_data_xy(ifilename, nrow, ncol):
+
+	''' Plot double data in txt format '''
+
 	data = np.loadtxt(ifilename, skiprows=0)
+	data = [*zip(*data)]
 	return data
 
 if __name__ == '__main__':
 	args = readCommand(sys.argv[1:])
-	#data = get_data_xy(args["ifilename"])
-	data = get_data_binary(args["ifilename"], args["nrow"], args["ncol"])
+	data = get_data_xy(args["ifilename"], args["nrow"], args["ncol"])
+	#data = get_data_binary(args["ifilename"], args["nrow"], args["ncol"])
 	plt.cla()
 	plt.imshow(data, cmap='gray')
 	if args["ofilename"]:

@@ -105,8 +105,6 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 			delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
 		} while (delta < 0); // delta > 0, enable to find an intersection
 
-		//printf("%lf, %lf, %lf, %lf\n", vec_w.x, vec_w.z, w_min_x, w_min_z);
-
 		solution = dotp_vc - sqrt(delta);
 
 		vec_i = vec3Scale(vec_v, solution);
@@ -118,14 +116,14 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 		brightness = vec3DotP(vec_s, vec_n);
 		brightness = MAX(brightness,0);
 
-		j = (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
+		j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
 		i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
 
 		#pragma omp atomic update
 		mat_grid[i * px + j] += brightness;
 	}
 
-	save_grid(mat_grid, px, py, "serial.out");
+	save_grid(mat_grid, px, py, "output.cpu.out");
 
 	free(mat_grid);
 }
@@ -145,8 +143,6 @@ Vec3 randomDirection() {
 	dest.x = sin(angle_theta) * cos(angle_psi);
 	dest.y = sin(angle_theta) * sin(angle_psi);
 	dest.z = cos(angle_theta);
-
-	//printf("%lf, %lf, %lf\n", dest.x, dest.y, dest.z);
 
 	return dest;
 }
