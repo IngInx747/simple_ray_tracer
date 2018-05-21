@@ -6,7 +6,6 @@ OBJ = obj
 ## Compiler
 CPUCOMPILER = gcc
 GPUCOMPILER = nvcc
-GPULINKER = nvlink
 
 ## Flags
 HEADFLAG = -I"$(INCLUDE)/"
@@ -20,23 +19,23 @@ NV = $(GPUCOMPILER) $(HEADFLAG) $(ARCHFLAG)
 
 all: ray_tracer_cpu ray_tracer_gpu
 
-ray_tracer_cpu: ray_tracer_cpu.o vec.o
-	$(CC) $(OBJ)/*.o -o $@.exe -lm
+ray_tracer_cpu: ray_tracer_cpu.o vec_cpu.o
+	$(CC) $(OBJ)/*_cpu.o -o $@.exe -lm
 
-ray_tracer_gpu: ray_tracer_gpu.co vec_gpu.co
-	$(NV) $(OBJ)/*.co -o $@.exe
+ray_tracer_gpu: ray_tracer_gpu.o vec_gpu.o
+	$(NV) $(OBJ)/*_gpu.o -o $@.exe
 
 ray_tracer_cpu.o: $(SRC)/ray_tracer_cpu.c
 	$(CC) -c $(SRC)/ray_tracer_cpu.c -o $(OBJ)/$@ -lm
 
-ray_tracer_gpu.co: $(SRC)/ray_tracer_gpu.cu
-	$(NV) -x cu -dc $(SRC)/ray_tracer_gpu.cu -o $(OBJ)/$@
+ray_tracer_gpu.o: $(SRC)/ray_tracer_gpu.cu
+	$(NV) -dc $< -o $(OBJ)/$@
 
-vec.o: $(SRC)/vec.c $(INCLUDE)/vec.h
+vec_cpu.o: $(SRC)/vec.c $(INCLUDE)/vec.h
 	$(CC) -c $< -o $(OBJ)/$@
 
-vec_gpu.co: $(SRC)/vec_gpu.cu $(INCLUDE)/vec_gpu.h
+vec_gpu.o: $(SRC)/vec_gpu.cu $(INCLUDE)/vec_gpu.h
 	$(NV) -dc $< -o $(OBJ)/$@
 
 clean:
-	rm *.exe $(OBJ)/*.o $(OBJ)/*.co
+	rm *.exe $(OBJ)/*.o
