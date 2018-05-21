@@ -16,8 +16,7 @@ ARCHFLAG = -arch=sm_30
 
 ##
 CC = $(CPUCOMPILER) $(HEADFLAG) $(OMPFLAG)
-NV = $(GPUCOMPILER) $(HEADFLAG)
-NL = $(GPULINKER) $(ARCHFLAG)
+NV = $(GPUCOMPILER) $(HEADFLAG) $(ARCHFLAG)
 
 all: ray_tracer_cpu ray_tracer_gpu
 
@@ -25,13 +24,13 @@ ray_tracer_cpu: ray_tracer_cpu.o vec.o
 	$(CC) $(OBJ)/*.o -o $@.exe -lm
 
 ray_tracer_gpu: ray_tracer_gpu.co vec_gpu.co
-	$(NL) $(OBJ)/*.co -o $@.exe
+	$(NV) $(OBJ)/*.co -o $@.exe
 
 ray_tracer_cpu.o: $(SRC)/ray_tracer_cpu.c
 	$(CC) -c $(SRC)/ray_tracer_cpu.c -o $(OBJ)/$@ -lm
 
 ray_tracer_gpu.co: $(SRC)/ray_tracer_gpu.cu
-	$(NV) -dc $(SRC)/ray_tracer_gpu.cu -o $(OBJ)/$@
+	$(NV) -x cu -dc $(SRC)/ray_tracer_gpu.cu -o $(OBJ)/$@
 
 vec.o: $(SRC)/vec.c $(INCLUDE)/vec.h
 	$(CC) -c $< -o $(OBJ)/$@
