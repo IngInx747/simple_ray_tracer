@@ -49,13 +49,15 @@ void save_grid(double * data, int px, int py, const char * fname);
 void setArgs(int argc, char** argv);
 
 /** Ray Tracer */
-__global__ void rayTrace(int px, int py, int nrays, Camera camera, double * mat_grid);
-__device__ void randomDirection(Vec3 * vptr);
-__device__ void rand_double(double start, double end, double *result);
+__global__ void setup_seed(curandState_t *state, unsigned long seed);
+__global__ void rayTrace(int px, int py, Camera camera, double * mat_grid, curandState_t *globalStates);
+__device__ void randomDirection(Vec3 * vptr, curandState_t *globalStates);
+__device__ void rand_double(double start, double end, double *result, curandState_t *globalStates);
 
 /** Global variables */
 int num_pixel;
-int num_ray;
+int num_block;
+int num_thread;
 
 
 
@@ -70,15 +72,14 @@ int num_ray;
 int main(int argc, char ** argv) {
 
 	num_pixel = 1000;
-	num_ray = 1e7;
+	num_block = 1;
+	num_thread = 100;
 	Camera cam;
 
 	cam.height = 20.0;
 	cam.width = 20.0;
 
 	setArgs(argc, argv);
-
-	srand(time(NULL));
 
 	/** Print GPU Device Name */
 	cudaDeviceProp prop;
@@ -91,6 +92,14 @@ int main(int argc, char ** argv) {
 	double * host_grid = (double*) malloc(num_pixel * num_pixel * sizeof(double));
 	double * device_grid;
 	CUDA_CALL(cudaMalloc((void**) &device_grid, num_pixel*num_pixel*sizeof(double)));
+	CUDA_CALL(cudaMemcpy(device_grid, host_grid, num_pixel*num_pixel * sizeof(double), cudaMemcpyHostToDevice));
+
+	/** Allocate state for random seed */
+	curandState_t *states;
+	CUDA_CALL(cudaMalloc((void**) &states, num_block * num_thread * sizeof(curandState_t)));
+
+	/** Setup seeds */
+	setup_seed<<<num_block, num_thread>>>(states, time(NULL));
 
 	/** CUDA timer variables */
 	cudaEvent_t start, stop;
@@ -101,7 +110,7 @@ int main(int argc, char ** argv) {
 	/** CUDA jobs */
 	cudaEventRecord(start, 0);
 	/** Do something */
-	rayTrace<<<1,1>>>(num_pixel, num_pixel, num_ray, cam, device_grid);
+	rayTrace<<<num_block, num_thread>>>(num_pixel, num_pixel, cam, device_grid, states);
 	/** Complete something */
 	CudaCheckError();
 	cudaEventRecord(stop, 0);
@@ -110,15 +119,14 @@ int main(int argc, char ** argv) {
 	cudaEventElapsedTime(&dt, start, stop);
 	cudaDeviceSynchronize();
 
-	CUDA_CALL(cudaMemcpy(host_grid, device_grid,
-		num_pixel*num_pixel * sizeof(double), cudaMemcpyDeviceToHost));
+	CUDA_CALL(cudaMemcpy(host_grid, device_grid, num_pixel*num_pixel * sizeof(double), cudaMemcpyDeviceToHost));
 
 	save_grid(host_grid, num_pixel, num_pixel, "output.gpu.out");
 
 	printf("%d\t%lf\n", num_pixel*num_pixel, dt/1000.0);
 
 	free(host_grid);
-	cudaFree(device_grid);
+	CUDA_CALL(cudaFree(device_grid));
 }
 
 
@@ -131,10 +139,18 @@ int main(int argc, char ** argv) {
 *
 **************************************************/
 
-__global__ void rayTrace(int px, int py, int nrays, Camera camera, double * mat_grid) {
+__global__ void setup_seed(curandState_t *state, unsigned long seed) {
 
-	/** Basic variables */
-	int n;
+	/* Initialize the state */
+
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	curand_init(seed, /* the seed controls the sequence of random values that are produced */
+		idx, /* the sequence number is only important with multiple cores */
+		0, /* the offset is how much extra we advance in the sequence for each call, can be 0 */
+		&state[idx]);
+}
+
+__global__ void rayTrace(int px, int py, Camera camera, double * mat_grid, curandState_t *globalStates) {
 
 	/** Model parameters */
 	double radius = 6.0;
@@ -157,50 +173,55 @@ __global__ void rayTrace(int px, int py, int nrays, Camera camera, double * mat_
 	w_min_z = camera.pos.z - camera.height * 0.5;
 	vec3DotP(&vec_c, &vec_c, &dotp_cc);
 
-	//omp_set_num_threads(16);
-	//#pragma omp parallel for schedule(guided) shared(mat_grid) private(n)
-	for (n=0; n<nrays; n++) {
+	/** Ray tracer variables local */
+	int i, j;
+	double delta, solution, brightness;
+	double dotp_vc;
+	Vec3 vec_v; // view ray vector
+	Vec3 vec_i; // position of intersection
+	Vec3 vec_s; // direction of light source at I
+	Vec3 vec_n; // unit normal vector at I
+	Vec3 vec_w; // camera vector
 
-		/** Ray tracer variables local */
-		int i, j;
-		double delta, solution, brightness;
-		double dotp_vc;
-		Vec3 vec_v; // view ray vector
-		Vec3 vec_i; // position of intersection
-		Vec3 vec_s; // direction of light source at I
-		Vec3 vec_n; // unit normal vector at I
-		Vec3 vec_w; // camera vector
+	do { // sample random V from unit sphere
+		do {
+			randomDirection(&vec_v, globalStates);
+			vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
+		} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
+		vec3DotP(&vec_v, &vec_c, &dotp_vc);
+		delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
+	} while (delta < 0); // delta > 0, enable to find an intersection
 
-		do { // sample random V from unit sphere
-			do {
-				randomDirection(&vec_v);
-				vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
-			} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
-			vec3DotP(&vec_v, &vec_c, &dotp_vc);
-			delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
-		} while (delta < 0); // delta > 0, enable to find an intersection
+	solution = dotp_vc - sqrtf(delta);
 
-		solution = dotp_vc - sqrtf(delta);
+	vec3Scale(&vec_v, solution, &vec_i);
+	vec3Combine(&vec_i, &vec_c, 1.0, -1.0, &vec_n);
+	vec3Normalize(&vec_n);
+	vec3Combine(&vec_l, &vec_i, 1.0, -1.0, &vec_s);
+	vec3Normalize(&vec_s);
 
-		vec3Scale(&vec_v, solution, &vec_i);
-		vec3Combine(&vec_i, &vec_c, 1.0, -1.0, &vec_n);
-		vec3Normalize(&vec_n);
-		vec3Combine(&vec_l, &vec_i, 1.0, -1.0, &vec_s);
-		vec3Normalize(&vec_s);
+	vec3DotP(&vec_s, &vec_n, &brightness);
+	brightness = MAX(brightness,0);
 
-		vec3DotP(&vec_s, &vec_n, &brightness);
-		brightness = MAX(brightness,0);
+	j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
+	i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
 
-		j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
-		i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
-
-		//#pragma omp atomic update
-		mat_grid[i * px + j] += brightness;
-		//atomicAdd(mat_grid[i * px + j], brightness);
-	}
+	//#pragma omp atomic update
+	mat_grid[i * px + j] += brightness;
+	//atomicAdd(mat_grid[i * px + j], brightness);
 }
 
-__device__ void randomDirection(Vec3 * vptr) {
+
+
+
+
+/**************************************************
+*
+*	Ray tracer functions called on GPU by GPU
+*
+**************************************************/
+
+__device__ void randomDirection(Vec3 * vptr, curandState_t *globalStates) {
 
 	/*
 	* return a unit vector of random direction.
@@ -209,36 +230,39 @@ __device__ void randomDirection(Vec3 * vptr) {
 	double angle_psi;
 	double angle_theta;
 
-	rand_double(0, 2 * PI, &angle_psi);
-	rand_double(0, PI, &angle_theta);
+	rand_double(0, 2 * PI, &angle_psi, globalStates);
+	rand_double(0, PI, &angle_theta, globalStates);
 
 	vptr->x = sin(angle_theta) * cos(angle_psi);
 	vptr->y = sin(angle_theta) * sin(angle_psi);
 	vptr->z = cos(angle_theta);
 }
 
-__device__ void rand_double(double start, double end, double *result) {
+__device__ void rand_double(double start, double end, double *result, curandState_t *globalStates) {
 
 	/*
 	* return a random double between start and end.
 	*/
 
-	/* CUDA's random number library uses curandState_t to keep track of the seed value
-     we will store a random state for every thread  */
-	curandState_t state;
-
-	/* we have to initialize the state */
-	curand_init(0, /* the seed controls the sequence of random values that are produced */
-		0, /* the sequence number is only important with multiple cores */
-		0, /* the offset is how much extra we advance in the sequence for each call, can be 0 */
-		&state);
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	curandState_t localState = globalStates[idx];
 
 	/* curand works like rand - except that it takes a state as a parameter */
-	double r = curand(&state) / (double) RAND_MAX;
+	double r = curand_uniform(&localState);
 	double x = (start < end) ? (start) : (end);
 	double y = (start < end) ? (end) : (start);
 	*result = (y - x) * r + x;
 }
+
+
+
+
+
+/**************************************************
+*
+*	Util functions called on Host
+*
+**************************************************/
 
 void __cudaCheckError(const char *file, const int line) {
 
@@ -260,16 +284,6 @@ void __cudaCheckError(const char *file, const int line) {
 	}
 	#endif
 }
-
-
-
-
-
-/**************************************************
-*
-*	Util functions called on Host
-*
-**************************************************/
 
 void save_grid(double * data, int px, int py, const char * fname) {
 
@@ -297,18 +311,22 @@ void setArgs(int argc, char** argv) {
 	static struct option long_options[] = {
 		//{"abc", 0|no_argument|required_argument|optional_argument, flag, 'a'},
 		{"pixel", required_argument, 0, 'n'},
-		{"nray", required_argument, 0, 'r'},
+		{"block", required_argument, 0, 'b'},
+		{"thread", required_argument, 0, 't'},
 		{0, 0, 0, 0}
 	};
 
 	/* Detect the end of the options. */
-	while ( (ch = getopt_long(argc, argv, "n:r:", long_options, &option_index)) != -1 ) {
+	while ( (ch = getopt_long(argc, argv, "n:b:t:", long_options, &option_index)) != -1 ) {
 		switch (ch) {
 			case 'n':
 				num_pixel = atoi(optarg);
 				break;
-			case 'r':
-				num_ray = atoi(optarg);
+			case 'b':
+				num_block = atoi(optarg);
+				break;
+			case 't':
+				num_thread = atoi(optarg);
 				break;
 			case '?':
 				printf("Unknown option\n");
