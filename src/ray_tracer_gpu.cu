@@ -50,13 +50,14 @@ void setArgs(int argc, char** argv);
 
 /** Ray Tracer */
 __global__ void setup_seed(curandState_t *state, unsigned long seed);
-__global__ void rayTrace(int px, int py, Camera camera, double * mat_grid, curandState_t *globalStates);
+__global__ void rayTrace(int px, int py, int ray_per_task, Camera camera, double * mat_grid, curandState_t *globalStates);
 __device__ void randomDirection(Vec3 * vptr, curandState_t *globalStates);
 __device__ void rand_double(double start, double end, double *result, curandState_t *globalStates);
 
 /** Global variables */
 int num_pixel;
 int num_block;
+int num_ray;
 int num_thread;
 
 
@@ -72,6 +73,7 @@ int num_thread;
 int main(int argc, char ** argv) {
 
 	num_pixel = 1000;
+	num_ray = 1e6;
 	num_block = 1;
 	num_thread = 100;
 	Camera cam;
@@ -80,6 +82,7 @@ int main(int argc, char ** argv) {
 	cam.width = 20.0;
 
 	setArgs(argc, argv);
+	int ray_per_task = num_ray / (num_block * num_thread);
 
 	/** Print GPU Device Name */
 	cudaDeviceProp prop;
@@ -110,7 +113,7 @@ int main(int argc, char ** argv) {
 	/** CUDA jobs */
 	cudaEventRecord(start, 0);
 	/** Do something */
-	rayTrace<<<num_block, num_thread>>>(num_pixel, num_pixel, cam, device_grid, states);
+	rayTrace<<<num_block, num_thread>>>(num_pixel, num_pixel, ray_per_task cam, device_grid, states);
 	/** Complete something */
 	CudaCheckError();
 	cudaEventRecord(stop, 0);
@@ -123,7 +126,7 @@ int main(int argc, char ** argv) {
 
 	save_grid(host_grid, num_pixel, num_pixel, "output.gpu.out");
 
-	printf("%d\t%lf\n", num_pixel*num_pixel, dt/1000.0);
+	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, dt/1000.0);
 
 	free(host_grid);
 	CUDA_CALL(cudaFree(device_grid));
@@ -150,7 +153,10 @@ __global__ void setup_seed(curandState_t *state, unsigned long seed) {
 		&state[idx]);
 }
 
-__global__ void rayTrace(int px, int py, Camera camera, double * mat_grid, curandState_t *globalStates) {
+__global__ void rayTrace(int px, int py, int ray_per_task, Camera camera,
+	double * mat_grid, curandState_t *globalStates) {
+
+	int n;
 
 	/** Model parameters */
 	double radius = 6.0;
@@ -173,42 +179,45 @@ __global__ void rayTrace(int px, int py, Camera camera, double * mat_grid, curan
 	w_min_z = camera.pos.z - camera.height * 0.5;
 	vec3DotP(&vec_c, &vec_c, &dotp_cc);
 
-	/** Ray tracer variables local */
-	int i, j;
-	double delta, solution, brightness;
-	double dotp_vc;
-	Vec3 vec_v; // view ray vector
-	Vec3 vec_i; // position of intersection
-	Vec3 vec_s; // direction of light source at I
-	Vec3 vec_n; // unit normal vector at I
-	Vec3 vec_w; // camera vector
+	for (n=0; n<ray_per_task; n++) {
 
-	do { // sample random V from unit sphere
-		do {
-			randomDirection(&vec_v, globalStates);
-			vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
-		} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
-		vec3DotP(&vec_v, &vec_c, &dotp_vc);
-		delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
-	} while (delta < 0); // delta > 0, enable to find an intersection
+		/** Ray tracer variables local */
+		int i, j;
+		double delta, solution, brightness;
+		double dotp_vc;
+		Vec3 vec_v; // view ray vector
+		Vec3 vec_i; // position of intersection
+		Vec3 vec_s; // direction of light source at I
+		Vec3 vec_n; // unit normal vector at I
+		Vec3 vec_w; // camera vector
 
-	solution = dotp_vc - sqrtf(delta);
+		do { // sample random V from unit sphere
+			do {
+				randomDirection(&vec_v, globalStates);
+				vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
+			} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
+			vec3DotP(&vec_v, &vec_c, &dotp_vc);
+			delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
+		} while (delta < 0); // delta > 0, enable to find an intersection
 
-	vec3Scale(&vec_v, solution, &vec_i);
-	vec3Combine(&vec_i, &vec_c, 1.0, -1.0, &vec_n);
-	vec3Normalize(&vec_n);
-	vec3Combine(&vec_l, &vec_i, 1.0, -1.0, &vec_s);
-	vec3Normalize(&vec_s);
+		solution = dotp_vc - sqrtf(delta);
 
-	vec3DotP(&vec_s, &vec_n, &brightness);
-	brightness = MAX(brightness,0);
+		vec3Scale(&vec_v, solution, &vec_i);
+		vec3Combine(&vec_i, &vec_c, 1.0, -1.0, &vec_n);
+		vec3Normalize(&vec_n);
+		vec3Combine(&vec_l, &vec_i, 1.0, -1.0, &vec_s);
+		vec3Normalize(&vec_s);
 
-	j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
-	i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
+		vec3DotP(&vec_s, &vec_n, &brightness);
+		brightness = MAX(brightness,0);
 
-	//#pragma omp atomic update
-	mat_grid[i * px + j] += brightness;
-	//atomicAdd(mat_grid[i * px + j], brightness);
+		j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
+		i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
+
+		//#pragma omp atomic update
+		mat_grid[i * px + j] += brightness;
+		//atomicAdd(mat_grid[i * px + j], brightness);
+	}
 }
 
 
@@ -245,10 +254,10 @@ __device__ void rand_double(double start, double end, double *result, curandStat
 	*/
 
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	curandState_t localState = globalStates[idx];
+	curandState_t *localState = &globalStates[idx];
 
 	/* curand works like rand - except that it takes a state as a parameter */
-	double r = curand_uniform(&localState);
+	double r = curand_uniform(localState);
 	double x = (start < end) ? (start) : (end);
 	double y = (start < end) ? (end) : (start);
 	*result = (y - x) * r + x;
@@ -311,16 +320,20 @@ void setArgs(int argc, char** argv) {
 	static struct option long_options[] = {
 		//{"abc", 0|no_argument|required_argument|optional_argument, flag, 'a'},
 		{"pixel", required_argument, 0, 'n'},
+		{"ray", required_argument, 0, 'r'},
 		{"block", required_argument, 0, 'b'},
 		{"thread", required_argument, 0, 't'},
 		{0, 0, 0, 0}
 	};
 
 	/* Detect the end of the options. */
-	while ( (ch = getopt_long(argc, argv, "n:b:t:", long_options, &option_index)) != -1 ) {
+	while ( (ch = getopt_long(argc, argv, "n:r:b:t:", long_options, &option_index)) != -1 ) {
 		switch (ch) {
 			case 'n':
 				num_pixel = atoi(optarg);
+				break;
+			case 'r':
+				num_ray = atoi(optarg);
 				break;
 			case 'b':
 				num_block = atoi(optarg);
