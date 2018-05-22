@@ -113,7 +113,7 @@ int main(int argc, char ** argv) {
 	/** CUDA jobs */
 	cudaEventRecord(start, 0);
 	/** Do something */
-	rayTrace<<<num_block, num_thread>>>(num_pixel, num_pixel, ray_per_task cam, device_grid, states);
+	rayTrace<<<num_block, num_thread>>>(num_pixel, num_pixel, ray_per_task, cam, device_grid, states);
 	/** Complete something */
 	CudaCheckError();
 	cudaEventRecord(stop, 0);
@@ -126,7 +126,7 @@ int main(int argc, char ** argv) {
 
 	save_grid(host_grid, num_pixel, num_pixel, "output.gpu.out");
 
-	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, dt/1000.0);
+	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, num_ray, dt/1000.0);
 
 	free(host_grid);
 	CUDA_CALL(cudaFree(device_grid));
