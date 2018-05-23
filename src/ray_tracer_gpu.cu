@@ -30,6 +30,20 @@
 #define CUDA_CALL(x) do { if((x) != cudaSuccess) { \
 	    printf("Error at %s:%d\n",__FILE__,__LINE__); \
 	    return EXIT_FAILURE;}} while(0)
+#if __CUDA_ARCH__ < 600
+__device__ double atomicAdd(double* address, double val) {
+
+	unsigned long long int* address_as_ull = (unsigned long long int*)address;
+	unsigned long long int old = *address_as_ull, assumed;
+
+	do { // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+		assumed = old;
+		old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+	} while (assumed != old);
+
+	return __longlong_as_double(old);
+}
+#endif
 
 
 
@@ -126,7 +140,7 @@ int main(int argc, char ** argv) {
 
 	save_grid(host_grid, num_pixel, num_pixel, "output.gpu.out");
 
-	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, num_ray, dt/1000.0);
+	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, num_block * num_thread * ray_per_task, dt/1000.0);
 
 	free(host_grid);
 	CUDA_CALL(cudaFree(device_grid));
@@ -215,8 +229,8 @@ __global__ void rayTrace(int px, int py, int ray_per_task, Camera camera,
 		i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
 
 		//#pragma omp atomic update
-		mat_grid[i * px + j] += brightness;
-		//atomicAdd(mat_grid[i * px + j], brightness);
+		//mat_grid[i * px + j] += brightness;
+		atomicAdd(&mat_grid[i * px + j], brightness);
 	}
 }
 

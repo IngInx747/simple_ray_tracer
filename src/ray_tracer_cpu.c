@@ -34,6 +34,7 @@ void setArgs(int argc, char** argv);
 /** Global variables */
 int num_pixel;
 int num_ray;
+int num_thread;
 
 int main(int argc, char** argv) {
 	
@@ -53,7 +54,7 @@ int main(int argc, char** argv) {
 	rayTrace(num_pixel, num_pixel, num_ray, cam);
 	dt = omp_get_wtime() - dt;
 
-	printf("%lf\n", dt);
+	printf("\n%d\t%d\t%lf\n", num_pixel*num_pixel, num_ray, dt);
 }
 
 void rayTrace(int px, int py, int nrays, Camera camera) {
@@ -82,7 +83,7 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 	w_min_z = camera.pos.z - camera.height * 0.5;
 	dotp_cc = vec3DotP(vec_c, vec_c);
 
-	omp_set_num_threads(16);
+	omp_set_num_threads(num_thread);
 	#pragma omp parallel for schedule(guided) shared(mat_grid) private(n)
 	for (n=0; n<nrays; n++) {
 
@@ -118,6 +119,10 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 
 		j = px - 1 - (int) ((double) px * (vec_w.x - w_min_x) / (camera.width));
 		i = (int) ((double) py * (vec_w.z - w_min_z) / (camera.height));
+		
+		/** To check progress */
+		//if (n%(nrays/100)==0) {printf("."); fflush(stdout);}
+		if (n%(nrays/100)==0) write(STDOUT_FILENO, ".", 2);
 
 		#pragma omp atomic update
 		mat_grid[i * px + j] += brightness;
@@ -185,18 +190,22 @@ void setArgs(int argc, char** argv) {
 	static struct option long_options[] = {
 		//{"abc", 0|no_argument|required_argument|optional_argument, flag, 'a'},
 		{"pixel", required_argument, 0, 'n'},
-		{"nray", required_argument, 0, 'r'},
+		{"ray", required_argument, 0, 'r'},
+		{"thread", required_argument, 0, 't'},
 		{0, 0, 0, 0}
 	};
 
 	/* Detect the end of the options. */
-	while ( (ch = getopt_long(argc, argv, "n:r:", long_options, &option_index)) != -1 ) {
+	while ( (ch = getopt_long(argc, argv, "n:r:t:", long_options, &option_index)) != -1 ) {
 		switch (ch) {
 			case 'n':
 				num_pixel = atoi(optarg);
 				break;
 			case 'r':
 				num_ray = atoi(optarg);
+				break;
+			case 't':
+				num_thread = atoi(optarg);
 				break;
 			case '?':
 				printf("Unknown option\n");
