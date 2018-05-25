@@ -40,6 +40,7 @@ int main(int argc, char** argv) {
 	
 	num_pixel = 1000;
 	num_ray = 1e7;
+	num_thread = 1;
 	Camera cam;
 
 	cam.pos = vec3(0.0, 10.0, 0.0);
@@ -98,13 +99,11 @@ void rayTrace(int px, int py, int nrays, Camera camera) {
 		Vec3 vec_w; // camera vector
 
 		do { // sample random V from unit sphere
-			do {
-				vec_v = randomDirection();
-				vec_w = vec3Scale(vec_v, camera.pos.y / vec_v.y);
-			} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
+			vec_v = randomDirection();
+			vec_w = vec3Scale(vec_v, camera.pos.y / vec_v.y);
 			dotp_vc = vec3DotP(vec_v, vec_c);
 			delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
-		} while (delta < 0); // delta > 0, enable to find an intersection
+		} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z || delta < 0);
 
 		solution = dotp_vc - sqrt(delta);
 

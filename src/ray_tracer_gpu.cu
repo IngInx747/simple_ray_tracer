@@ -97,6 +97,7 @@ int main(int argc, char ** argv) {
 
 	setArgs(argc, argv);
 	int ray_per_task = num_ray / (num_block * num_thread);
+	if (ray_per_task == 0) ray_per_task = 1;
 
 	/** Print GPU Device Name */
 	cudaDeviceProp prop;
@@ -104,6 +105,7 @@ int main(int argc, char ** argv) {
 	cudaGetDevice(&device);
 	cudaGetDeviceProperties(&prop, device);
 	printf("%-25s%s\n", "CUDA Device: ", prop.name);
+	printf("Blocks: %d\t Threads: %d\n", num_block, num_thread);
 
 	/** Allocate serialized Grid Array on Host & Device */
 	double * host_grid = (double*) malloc(num_pixel * num_pixel * sizeof(double));
@@ -140,7 +142,7 @@ int main(int argc, char ** argv) {
 
 	save_grid(host_grid, num_pixel, num_pixel, "output.gpu.out");
 
-	printf("%d\t%d\t%lf\n", num_pixel*num_pixel, num_block * num_thread * ray_per_task, dt/1000.0);
+	printf("Image size: %d\t Rays: %d\t Time(s): %lf\n", num_pixel*num_pixel, num_block * num_thread * ray_per_task, dt/1000.0);
 
 	free(host_grid);
 	CUDA_CALL(cudaFree(device_grid));
@@ -206,13 +208,11 @@ __global__ void rayTrace(int px, int py, int ray_per_task, Camera camera,
 		Vec3 vec_w; // camera vector
 
 		do { // sample random V from unit sphere
-			do {
-				randomDirection(&vec_v, globalStates);
-				vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
-			} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z);
+			randomDirection(&vec_v, globalStates);
+			vec3Scale(&vec_v, camera.pos.y / vec_v.y, &vec_w);
 			vec3DotP(&vec_v, &vec_c, &dotp_vc);
 			delta = dotp_vc*dotp_vc + radius*radius - dotp_cc;
-		} while (delta < 0); // delta > 0, enable to find an intersection
+		} while (vec_w.x < w_min_x || vec_w.x > w_max_x || vec_w.z < w_min_z || vec_w.z > w_max_z || delta < 0);
 
 		solution = dotp_vc - sqrtf(delta);
 
@@ -256,9 +256,14 @@ __device__ void randomDirection(Vec3 * vptr, curandState_t *globalStates) {
 	rand_double(0, 2 * PI, &angle_psi, globalStates);
 	rand_double(0, PI, &angle_theta, globalStates);
 
-	vptr->x = sin(angle_theta) * cos(angle_psi);
-	vptr->y = sin(angle_theta) * sin(angle_psi);
-	vptr->z = cos(angle_theta);
+	double sint = sin(angle_theta);
+	double cost = cos(angle_theta);
+	double sinp = sin(angle_psi);
+	double cosp = cos(angle_psi);
+
+	vptr->x = sint * cosp;
+	vptr->y = sint * sinp;
+	vptr->z = cost;
 }
 
 __device__ void rand_double(double start, double end, double *result, curandState_t *globalStates) {
@@ -272,8 +277,8 @@ __device__ void rand_double(double start, double end, double *result, curandStat
 
 	/* curand works like rand - except that it takes a state as a parameter */
 	double r = curand_uniform(localState);
-	double x = (start < end) ? (start) : (end);
-	double y = (start < end) ? (end) : (start);
+	double x = start;
+	double y = end;
 	*result = (y - x) * r + x;
 }
 
