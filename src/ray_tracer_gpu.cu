@@ -254,12 +254,14 @@ __device__ void randomDirection(Vec3 * vptr, curandState_t *globalStates) {
 	double angle_theta;
 
 	rand_double(0, 2 * PI, &angle_psi, globalStates);
-	rand_double(0, PI, &angle_theta, globalStates);
+	rand_double(0, 1, &angle_theta, globalStates);
 
-	double sint = sin(angle_theta);
+	angle_theta = acos(1 - 2 * angle_theta);
+	
 	double cost = cos(angle_theta);
-	double sinp = sin(angle_psi);
+	double sint = sin(angle_theta);
 	double cosp = cos(angle_psi);
+	double sinp = sin(angle_psi);
 
 	vptr->x = sint * cosp;
 	vptr->y = sint * sinp;
