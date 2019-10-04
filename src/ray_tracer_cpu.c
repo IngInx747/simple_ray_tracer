@@ -141,7 +141,7 @@ Vec3 randomDirection() {
 	Vec3 dest;
 
 	double angle_psi = rand_double(0, 2 * PI);
-	double cos_theta = sqrt(rand_double(0.0, 1.0));
+	double cos_theta = rand_double(0.0, 1.0);
 	double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 	
 	dest.x = sin_theta * cos(angle_psi);
