@@ -138,15 +138,15 @@ Vec3 randomDirection() {
 	* return a unit vector of random direction.
 	*/
 
-	double angle_psi, angle_theta;
 	Vec3 dest;
 
-	angle_psi = rand_double(0, 2 * PI);
-	angle_theta = rand_double(0, PI);
-
-	dest.x = sin(angle_theta) * cos(angle_psi);
-	dest.y = sin(angle_theta) * sin(angle_psi);
-	dest.z = cos(angle_theta);
+	double angle_psi = rand_double(0, 2 * PI);
+	double cos_theta = sqrt(rand_double(0.0, 1.0));
+	double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+	
+	dest.x = sin_theta * cos(angle_psi);
+	dest.y = sin_theta * sin(angle_psi);
+	dest.z = cos_theta;
 
 	return dest;
 }
